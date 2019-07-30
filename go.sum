@@ -1,2 +1,5 @@
+github.com/jansemmelink/items v0.2.0 h1:adAxQvLHOL+Lryc0ANWRkq2LTVG+HpiPP0DRV2wGZvg=
 github.com/jansemmelink/log v0.3.0 h1:9VLc9thM0HeUQw808EN1jzqeLEUxwS3c6DgoNzSOtJc=
 github.com/jansemmelink/log v0.3.0/go.mod h1:4npzuSpVcgpimzy6N9b1E1yTv5L4QfZ2G0CzNDb+55M=
+github.com/satori/uuid v1.2.0 h1:6TFY4nxn5XwBx0gDfzbEMCNT6k4N/4FNIuN8RACZ0KI=
+github.com/satori/uuid v1.2.0/go.mod h1:B8HLsPLik/YNn6KKWVMDJ8nzCL8RP5WyfsnmvnAEwIU=

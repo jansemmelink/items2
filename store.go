@@ -5,14 +5,14 @@ import (
 )
 
 //IStore of items
-type IStore interface{
-	//Name returns the item name, e.g. "group" or "person"
+type IStore interface {
 	Name() string
+	Type() reflect.Type
+	Tmpl() IItem               //return a template item
+	Add(IItem) (string, error) //add then return new id if added or error
+	Get(string) (IItem, error) //get item with specified id
+	Upd(string, IItem) error   //update item with specified id
+	Del(id string) error       //delete item with specified id
 
-	ItemType() reflect.Type
-	Get(id string) (IItem,error)
-	Upd(IItem) error
-	New(value interface{}) (IItem,error)
-	Del(id string) error
-	Find(size int/*filter...*/) []IItem
+	Find(size int, filter IItem) []IItem
 }
