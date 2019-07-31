@@ -54,9 +54,9 @@ func New(parentDir string, name string, tmpl items.IItem) (items.IStore, error) 
 	// 	return nil
 	// })
 
-	log.Debugf("JSONFILE(%s,%s)", s.path, s.itemName)
+	log.Debugf("Creates JSON files store of %s in dir %s", s.itemName, s.path)
 	return s, nil
-}
+} //New()
 
 //store implements items.IStore for a directory with one JSON file per item
 type store struct {
@@ -68,51 +68,6 @@ type store struct {
 	filenamePattern string
 	filenameRegex   *regexp.Regexp
 }
-
-// func (s *store) New(value interface{}) (items.IItem, error) {
-// 	s.mutex.Lock()
-// 	defer s.mutex.Unlock()
-// 	log.Debugf("NEW:%+v", value)
-
-// 	//new item must assing an id
-// 	ni := s.newItem().SetID(fmt.Sprintf("%d", s.nextID))
-
-// 	//update the new item with the specified value
-// 	niu, err := ni.Set(value)
-// 	if err != nil {
-// 		return nil, log.Wrapf(err, "Invalid value for new item")
-// 	}
-
-// 	//write item to file
-// 	fn := s.itemFilename(niu.ID())
-// 	f, err := os.Create(fn)
-// 	if err != nil {
-// 		return nil, log.Wrapf(err, "Cannot create new item file %s", fn)
-// 	}
-// 	defer f.Close()
-
-// 	fileValue := itemFile{}
-// 	fileValue.ID = niu.ID()
-// 	fileValue.Revs = []itemRev{
-// 		{Rev: 1, Value: value},
-// 	}
-// 	jsonFileValue, err := json.Marshal(fileValue)
-// 	if err != nil {
-// 		return nil, log.Wrapf(err, "Failed to encode item value as JSON")
-// 	}
-
-// 	_, err = f.Write(jsonFileValue)
-// 	if err != nil {
-// 		f.Close()
-// 		os.Remove(fn)
-// 		return nil, log.Wrapf(err, "Failed to write item value to file %s", fn)
-// 	}
-
-// 	s.nextID++
-
-// 	log.Debugf("NEW(%s): id=%s, rev=%d value=%+v", s.Name(), niu.ID(), niu.Rev(), niu.Value())
-// 	return niu, nil
-// }
 
 //Name ...
 func (s *store) Name() string {
@@ -130,6 +85,12 @@ func (s *store) Tmpl() items.IItem {
 }
 
 func (s *store) Add(item items.IItem) (string, error) {
+	if item == nil {
+		return "", log.Wrapf(nil, "cannot add nil item")
+	}
+	if err := item.Validate(); err != nil {
+		return "", log.Wrapf(err, "cannot add invalid item")
+	}
 	//todo: add index functions, e.g. check for unique name in the store
 
 	//assign a new ID
@@ -151,11 +112,38 @@ func (s *store) Add(item items.IItem) (string, error) {
 	}
 	log.Debugf("ADD(%s)", id)
 	return id, nil
-}
+} //store.Add()
 
 func (s *store) Upd(id string, item items.IItem) error {
-	return log.Wrapf(nil, "NYI")
-}
+	if item == nil {
+		return log.Wrapf(nil, "cannot upd nil item")
+	}
+	if err := item.Validate(); err != nil {
+		return log.Wrapf(err, "cannot upd invalid item")
+	}
+
+	fn := s.itemFilename(id)
+	if _, err := os.Stat(fn); err != nil {
+		return log.Wrapf(nil, "%s.id=%s does not exist", s.Name(), id)
+	}
+
+	jsonItem, err := json.Marshal(item)
+	if err != nil {
+		return log.Wrapf(err, "failed to JSON encode item")
+	}
+	f, err := os.Create(fn)
+	if err != nil {
+		return log.Wrapf(err, "failed to create item file %s", fn)
+	}
+	defer f.Close()
+
+	_, err = f.Write(jsonItem)
+	if err != nil {
+		return log.Wrapf(err, "failed to write item to file %s", fn)
+	}
+	log.Debugf("UPD(%s)", id)
+	return nil
+} //store.Upd()
 
 func (s *store) Del(id string) error {
 	return log.Wrapf(nil, "NYI")
@@ -184,105 +172,38 @@ func (s *store) Get(id string) (items.IItem, error) {
 	return newItem, nil
 }
 
-//Upd writes next rev to existing file
-// func (s *store) Upd(i items.IItem) error {
-// 	s.mutex.Lock()
-// 	defer s.mutex.Unlock()
-
-// 	fn := s.itemFilename(i.ID())
-// 	jsonFile, err := os.Open(fn)
-// 	if err != nil {
-// 		return log.Wrapf(err, "Cannot open %s file: %s", s.itemName, fn)
-// 	}
-// 	defer jsonFile.Close()
-
-// 	//read existing data
-// 	fileValue := itemFile{}
-// 	if err := json.NewDecoder(jsonFile).Decode(&fileValue); err != nil {
-// 		return log.Wrapf(err, "Failed to decode JSON file %s into %s", fn, s.itemName)
-// 	}
-// 	jsonFile.Close()
-
-// 	if fileValue.ID != i.ID() {
-// 		return log.Wrapf(nil, "File %s does not have id=%s", fn, i.ID())
-// 	}
-// 	if len(fileValue.Revs) < 1 {
-// 		return log.Wrapf(nil, "File %s has no item revisions", fn)
-// 	}
-
-// 	lastRev := fileValue.Revs[len(fileValue.Revs)-1]
-// 	if i.Rev() != lastRev.Rev+1 {
-// 		return log.Wrapf(nil, "File %s has rev=%d. Cannot upd with rev=%d", fn, lastRev.Rev, i.Rev())
-// 	}
-
-// 	fileValue.Revs = append(fileValue.Revs, itemRev{Rev: i.Rev(), Value: i.Value()})
-
-// 	//write new value to file
-// 	jsonFileValue, _ := json.Marshal(fileValue)
-// 	jsonFile, err = os.Create(fn)
-// 	if err != nil {
-// 		return log.Wrapf(err, "Failed to re-open file for update")
-// 	}
-// 	_, err = jsonFile.Write(jsonFileValue)
-// 	if err != nil {
-// 		return log.Wrapf(err, "Failed to write to re-opened file for update")
-// 	}
-
-// 	jsonFile.Close()
-// 	return nil
-// }
-
-// func (s *store) Del(id string) error {
-// 	s.mutex.Lock()
-// 	defer s.mutex.Unlock()
-
-// 	fn := s.itemFilename(id)
-// 	err := os.Remove(fn)
-// 	if err != nil {
-// 		return log.Wrapf(err, "Failed to delete %s", fn)
-// 	}
-// 	return nil
-// }
-
-func (s *store) Find(size int, filter items.IItem) []items.IItem {
+func (s *store) Find(size int, filter items.IItem) map[string]items.IItem {
+	//do not lock, because we use Get() inside this func...
 	// s.mutex.Lock()
 	// defer s.mutex.Unlock()
 
 	//walk the directory
-	list := make([]items.IItem, 0)
+	list := make(map[string]items.IItem, 0)
 	filepath.Walk(
 		s.path,
 		func(path string, info os.FileInfo, err error) error {
 			if info.Mode().IsRegular() {
 				parts := s.filenameRegex.FindStringSubmatch(path)
-				log.Debugf("Eval file \"%s\" with %d parts: %v", info.Name(), len(parts), parts)
+				//log.Debugf("Eval file \"%s\" with %d parts: %v", info.Name(), len(parts), parts)
 				if len(parts) >= 2 {
 					id := parts[1] //parts[0] = full name, parts[1] = sub string match
 
 					item, err := s.Get(id)
 					if err != nil {
-						log.Errorf("List ignores file %s: %+v", info.Name(), err)
+						//log.Errorf("List ignores file %s: %+v", info.Name(), err)
 					} else {
-						log.Debugf("Check")
 						if filter != nil {
-							log.Debugf("Check")
 							if err := item.Match(filter); err != nil {
-								log.Debugf("Check")
-								log.Errorf("Filter out file %s: %+v", info.Name(), err)
+								//log.Errorf("Filter out file %s: %+v", info.Name(), err)
 								item = nil
 							}
-							log.Debugf("Check")
 						}
-						log.Debugf("Check")
 						if item != nil {
-							log.Debugf("Check")
-							list = append(list, item)
+							list[id] = item
 							if size > 0 && len(list) >= size {
 								//stop processing
 								return filepath.SkipDir
 							}
-						} else {
-							log.Debugf("Check")
 						}
 					}
 				}

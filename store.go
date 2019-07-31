@@ -14,5 +14,7 @@ type IStore interface {
 	Upd(string, IItem) error   //update item with specified id
 	Del(id string) error       //delete item with specified id
 
-	Find(size int, filter IItem) []IItem
+	//Find returns a list of items, limited by size and applying the optional filter item
+	//the map index is the item id that can be used to access the item
+	Find(size int, filter IItem) map[string]IItem
 }
