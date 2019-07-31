@@ -88,6 +88,9 @@ func (s *store) Tmpl() items.IItem {
 }
 
 func (s *store) Add(item items.IItem) (string, error) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
 	if item == nil {
 		return "", log.Wrapf(nil, "cannot add nil item")
 	}
@@ -118,6 +121,9 @@ func (s *store) Add(item items.IItem) (string, error) {
 } //store.Add()
 
 func (s *store) Upd(id string, item items.IItem) error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
 	if item == nil {
 		return log.Wrapf(nil, "cannot upd nil item")
 	}
@@ -149,7 +155,15 @@ func (s *store) Upd(id string, item items.IItem) error {
 } //store.Upd()
 
 func (s *store) Del(id string) error {
-	return log.Wrapf(nil, "NYI")
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	fn := s.itemFilename(id)
+	err := os.Remove(fn)
+	if err != nil {
+		return log.Wrapf(err, "Cannot delete %s file: %s", s.itemName, fn)
+	}
+	return nil
 }
 
 func (s *store) Get(id string) (items.IItem, error) {
