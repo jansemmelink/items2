@@ -40,6 +40,9 @@ func New(parentDir string, name string, tmpl items.IItem) (items.IStore, error) 
 		itemType:        reflect.TypeOf(tmpl),
 		filenamePattern: fmt.Sprintf("%s_([a-z0-9-]+).json", name),
 	}
+	if s.itemType.Kind() == reflect.Ptr {
+		s.itemType = s.itemType.Elem()
+	}
 	s.filenameRegex = regexp.MustCompile(s.filenamePattern)
 
 	//see if has any files in the dir, then see what's the latest existing id
