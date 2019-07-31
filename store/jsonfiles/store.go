@@ -38,7 +38,7 @@ func New(parentDir string, name string, tmpl items.IItem) (items.IStore, error) 
 		itemName:        name,
 		itemTmpl:        tmpl,
 		itemType:        reflect.TypeOf(tmpl),
-		filenamePattern: fmt.Sprintf("%s_([a-z0-9-]+).json", name),
+		filenamePattern: fmt.Sprintf(`%s_(.*)\.json`, name),
 	}
 	if s.itemType.Kind() == reflect.Ptr {
 		s.itemType = s.itemType.Elem()
@@ -210,7 +210,7 @@ func (s *store) Find(size int, filter items.IItem) map[string]items.IItem {
 		func(path string, info os.FileInfo, err error) error {
 			if info.Mode().IsRegular() {
 				parts := s.filenameRegex.FindStringSubmatch(path)
-				//log.Debugf("Eval file \"%s\" with %d parts: %v", info.Name(), len(parts), parts)
+				log.Debugf("Eval file \"%s\" with %d parts: %v", info.Name(), len(parts), parts)
 				if len(parts) >= 2 {
 					id := parts[1] //parts[0] = full name, parts[1] = sub string match
 
