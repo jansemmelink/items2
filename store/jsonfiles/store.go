@@ -100,12 +100,21 @@ func (s *store) Add(item items.IItem) (string, error) {
 	//todo: add index functions, e.g. check for unique name in the store
 
 	//assign a new ID
-	id := uuid.NewV1().String()
+	id, err := s.NewID(item)
+	if err != nil {
+		return "", log.Wrapf(err, "cannot assign unique id to new %s", s.Name())
+	}
+
+	//make sure it does not exist
+	fn := s.itemFilename(id)
+	if _, err := os.Stat(fn); err == nil {
+		return "", log.Wrapf(err, "%s.id=%s already exists", s.Name(), id)
+	}
+
 	jsonItem, err := json.Marshal(item)
 	if err != nil {
 		return "", log.Wrapf(err, "Failed to JSON encode item")
 	}
-	fn := s.itemFilename(id)
 	f, err := os.Create(fn)
 	if err != nil {
 		return "", log.Wrapf(err, "Failed to create item file %s", fn)
@@ -269,4 +278,21 @@ func mkdir(dir string) error {
 		return log.Wrapf(err, "os.Mkdir(%s) failed", dir)
 	}
 	return nil
+}
+
+//IItemWithID is supported if user item type implements ID() method
+//which is useful when items should not be identified by uuid but by name etc...
+type IItemWithID interface {
+	items.IItem
+	ID() string
+}
+
+func (s *store) NewID(item items.IItem) (string, error) {
+	if item == nil {
+		return "", log.Wrapf(nil, "NewID(nil)")
+	}
+	if itemWithID, ok := item.(IItemWithID); ok {
+		return itemWithID.ID(), nil
+	}
+	return uuid.NewV1().String(), nil
 }
