@@ -1,3 +1,4 @@
+//Package jsonfiles implements a IItem store using a directory with one JSON file per item
 package jsonfiles
 
 import (
@@ -57,7 +58,7 @@ func New(parentDir string, name string, tmpl items.IItem) (items.IStore, error) 
 	// 	return nil
 	// })
 
-	log.Debugf("Creates JSON files store of %s in dir %s", s.itemName, s.path)
+	log.Debugf("Created JSON files store of %s in dir %s", s.itemName, s.path)
 	return s, nil
 } //New()
 
@@ -237,10 +238,6 @@ func (s *store) Find(size int, filter items.IItem) map[string]items.IItem {
 			return nil
 		})
 	return list
-}
-
-func (s *store) ItemType() reflect.Type {
-	return s.itemType
 }
 
 func (s *store) itemFilename(id string) string {
