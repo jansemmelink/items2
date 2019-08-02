@@ -30,10 +30,11 @@ func New(filename string, name string, tmpl IItemWithID) (items.IStore, error) {
 		itemName:      name,
 		itemTmpl:      tmpl,
 		itemType:      reflect.TypeOf(tmpl),
-		itemsFromFile: make([]IItemWithID, 0),
+		itemsFromFile: make([]*IItemWithID, 0),
 		itemByID:      make(map[string]*IItemWithID),
 	}
 	if s.itemType.Kind() == reflect.Ptr {
+		//dereference the &myStruct{} type to just myStruct{}
 		s.itemType = s.itemType.Elem()
 	}
 
@@ -52,7 +53,7 @@ type store struct {
 	itemTmpl items.IItem
 	itemType reflect.Type
 
-	itemsFromFile []IItemWithID
+	itemsFromFile []*IItemWithID
 	itemByID      map[string]*IItemWithID
 }
 
@@ -95,11 +96,12 @@ func (s *store) Add(item items.IItem) (string, error) {
 	}
 
 	//append and update file
-	updatedItemsFromFile := append(s.itemsFromFile, item.(IItemWithID))
+	itemWithID := item.(IItemWithID)
+	updatedItemsFromFile := append(s.itemsFromFile, &itemWithID)
 	if err := s.updateFile(updatedItemsFromFile); err != nil {
 		return "", log.Wrapf(err, "failed to update JSON file")
 	}
-	s.itemByID[id] = &s.itemsFromFile[len(s.itemsFromFile)-1]
+	s.itemByID[id] = s.itemsFromFile[len(s.itemsFromFile)-1]
 	log.Debugf("ADD(%s)", id)
 	return id, nil
 } //store.Add()
@@ -121,9 +123,10 @@ func (s *store) Upd(id string, item items.IItem) error {
 	//replace and update file
 	updatedItemsFromFile := s.itemsFromFile
 	updIndex := -1
-	for index, oldItem := range updatedItemsFromFile {
-		if oldItem.ID() == id {
-			updatedItemsFromFile[index] = item.(IItemWithID)
+	for index, oldItemPtr := range updatedItemsFromFile {
+		if (*oldItemPtr).ID() == id {
+			itemWithID := item.(IItemWithID)
+			updatedItemsFromFile[index] = &itemWithID
 			updIndex = index
 			break
 		}
@@ -135,7 +138,7 @@ func (s *store) Upd(id string, item items.IItem) error {
 	if err := s.updateFile(updatedItemsFromFile); err != nil {
 		return log.Wrapf(err, "failed to update JSON file")
 	}
-	s.itemByID[id] = &s.itemsFromFile[updIndex]
+	s.itemByID[id] = s.itemsFromFile[updIndex]
 	log.Debugf("UPD(%s) -> %+v", id, *s.itemByID[id])
 	return nil
 } //store.Upd()
@@ -146,7 +149,7 @@ func (s *store) Del(id string) error {
 
 	//remove and update file
 	for index, oldItem := range s.itemsFromFile {
-		if oldItem.ID() == id {
+		if (*oldItem).ID() == id {
 			updatedItemsFromFile := append(s.itemsFromFile[0:index-1], s.itemsFromFile[index:]...)
 			if err := s.updateFile(updatedItemsFromFile); err != nil {
 				return log.Wrapf(err, "failed to update JSON file")
@@ -180,12 +183,12 @@ func (s *store) Find(size int, filter items.IItem) map[string]items.IItem {
 	list := make(map[string]items.IItem, 0)
 	for _, item := range s.itemsFromFile {
 		if filter != nil {
-			if err := item.Match(filter); err != nil {
+			if err := (*item).Match(filter); err != nil {
 				//log.Errorf("Filter out file %s: %+v", info.Name(), err)
 				continue
 			}
 		}
-		list[item.ID()] = item
+		list[(*item).ID()] = *item
 		if size > 0 && len(list) >= size {
 			break
 		}
@@ -233,7 +236,7 @@ func (s *store) readFile(filename string) error {
 		//created empty file
 		//store now has empty list
 		f.Close()
-		s.itemsFromFile = make([]IItemWithID, 0)
+		s.itemsFromFile = make([]*IItemWithID, 0)
 		s.itemByID = make(map[string]*IItemWithID)
 		return nil
 	}
@@ -245,8 +248,8 @@ func (s *store) readFile(filename string) error {
 	}
 	defer f.Close()
 
-	//make an array (slice) of the store items
-	sliceType := reflect.SliceOf(s.itemType)
+	//make an array []*IItem using the store's item type
+	sliceType := reflect.SliceOf(reflect.PtrTo(s.itemType))
 	itemSlicePtrValue := reflect.New(sliceType)
 	itemSlicePtr := itemSlicePtrValue.Interface()
 
@@ -257,24 +260,38 @@ func (s *store) readFile(filename string) error {
 		}
 		//EOF: empty JSON file
 		//store now has empty list
-		s.itemsFromFile = make([]IItemWithID, 0)
+		s.itemsFromFile = make([]*IItemWithID, 0)
 		s.itemByID = make(map[string]*IItemWithID)
 		return nil
 	}
 
-	itemsFromFile := make([]IItemWithID, 0)
+	//copy into array and id-map and ensure ids are unique
+	itemsFromFile := make([]*IItemWithID, 0)
+	itemByID := make(map[string]*IItemWithID)
 	for i := 0; i < itemSlicePtrValue.Elem().Len(); i++ {
 		v := itemSlicePtrValue.Elem().Index(i).Interface()
-		log.Debugf("[%d]: (%T) %v", i, v, v)
-		item := v.(IItemWithID)
-		log.Debugf("[%d]: (%T) %v.id=%s", i, item, item, item.ID())
-		itemsFromFile = append(itemsFromFile, item)
+		itemPtr := v.(IItemWithID)
+		id := (itemPtr).ID()
+		if len(id) == 0 {
+			return log.Wrapf(nil, "Missing id in file %s %s[%d]", filename, s.Name(), i)
+		}
+		if _, ok := itemByID[id]; ok {
+			return log.Wrapf(nil, "Duplicate id in file %s %s[%d].id=\"%s\"", filename, s.Name(), i, id)
+		}
+
+		if err := itemPtr.Validate(); err != nil {
+			return log.Wrapf(err, "file %s %s[%d].id=%s is invalid", filename, s.Name(), i, id)
+		}
+
+		itemWithID := itemPtr.(IItemWithID)
+		itemsFromFile = append(itemsFromFile, &itemWithID)
+		itemByID[id] = &itemWithID
+		log.Debugf("LOADED %s[%d]: (%T).id=%s: %+v", filename, i, itemWithID, id, itemWithID)
 	}
 
 	//make id index
-	itemByID := make(map[string]*IItemWithID)
 	for _, item := range s.itemsFromFile {
-		itemByID[item.ID()] = &item
+		itemByID[(*item).ID()] = item
 	}
 
 	//replace the old list
@@ -283,7 +300,7 @@ func (s *store) readFile(filename string) error {
 	return nil
 } //store.readFile()
 
-func (s *store) updateFile(updatedItems []IItemWithID) error {
+func (s *store) updateFile(updatedItems []*IItemWithID) error {
 	f, err := os.Create(s.filename)
 	if err != nil {
 		return log.Wrapf(err, "Failed to create new file %s", s.filename)
