@@ -34,6 +34,21 @@ func New(parentDir string, name string, tmpl items.IItem) (items.IStore, error) 
 		return nil, log.Wrapf(err, "Cannot create directory \"%s\" for jsonfiles", path)
 	}
 
+	//todo:
+	// if len(name) == 0 || !validName.MatchString(name) {
+	// 	return nil, log.Wrapf(nil, "New(name==%s) invalid identifier", name)
+	// }
+	if tmpl == nil {
+		return nil, log.Wrapf(nil, "New(tmpl==nil)")
+	}
+	//todo:
+	// if idGen == nil {
+	// 	return nil, log.Wrapf(nil, "New(idGen==nil)")
+	// }
+	if _, ok := tmpl.(items.IItemWithID); ok {
+		return nil, log.Wrapf(nil, "%T may not have ID() method.", tmpl)
+	}
+
 	s := &store{
 		path:            path,
 		itemName:        name,
@@ -80,6 +95,14 @@ func (s *store) Name() string {
 
 //Type ...
 func (s *store) Type() reflect.Type {
+	return s.itemType
+}
+
+//StructType ...
+func (s *store) StructType() reflect.Type {
+	if s.itemType.Kind() == reflect.Ptr {
+		return s.itemType.Elem()
+	}
 	return s.itemType
 }
 
@@ -199,13 +222,13 @@ func (s *store) Get(id string) (items.IItem, error) {
 	return newItem, nil
 }
 
-func (s *store) Find(size int, filter items.IItem) map[string]items.IItem {
+func (s *store) Find(size int, filter items.IItem) []items.IDAndItem {
 	//do not lock, because we use Get() inside this func...
 	// s.mutex.Lock()
 	// defer s.mutex.Unlock()
 
 	//walk the directory
-	list := make(map[string]items.IItem, 0)
+	list := make([]items.IDAndItem, 0)
 	filepath.Walk(
 		s.path,
 		func(path string, info os.FileInfo, err error) error {
@@ -226,7 +249,7 @@ func (s *store) Find(size int, filter items.IItem) map[string]items.IItem {
 							}
 						}
 						if item != nil {
-							list[id] = item
+							list = append(list, items.IDAndItem{ID: id, Item: item})
 							if size > 0 && len(list) >= size {
 								//stop processing
 								return filepath.SkipDir
