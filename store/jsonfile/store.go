@@ -275,6 +275,7 @@ func (s *store) readFile(filename string) error {
 	//copy into array and id-map and ensure ids are unique
 	itemsFromFile := make([]fileItem, 0)
 	itemByID := make(map[string]items.IItem)
+	needUpdate := false
 	for i := 0; i < itemSlicePtrValue.Elem().Len(); i++ {
 		fileItemValue := itemSlicePtrValue.Elem().Index(i)
 		id := fileItemValue.Field(0).Interface().(string)
@@ -283,6 +284,7 @@ func (s *store) readFile(filename string) error {
 		//hack for reload of pre-_id-files
 		if len(id) == 0 {
 			id = s.idGen.NewID()
+			needUpdate = true
 		}
 		log.Debugf("Got [%d]: id=(%T)%v, item=(%T):%v", i, id, id, itemData, itemData)
 
@@ -303,6 +305,12 @@ func (s *store) readFile(filename string) error {
 		log.Debugf("LOADED %s[%d]: id=%s: %+v", filename, i, id, item)
 	}
 
+	if needUpdate {
+		if err := s.updateFile(itemsFromFile); err != nil {
+			return log.Wrapf(err, "Failed to update file %s with new ids", filename)
+		}
+	}
+
 	//replace the old list
 	s.itemsFromFile = itemsFromFile
 	s.itemByID = itemByID
@@ -316,16 +324,15 @@ func (s *store) updateFile(updatedItems []fileItem) error {
 	}
 	defer f.Close()
 
-	return log.Wrapf(nil, "NYI")
-	// jsonFileData, _ := json.Marshal(updatedItems)
-	// _, err = f.Write(jsonFileData)
-	// if err != nil {
-	// 	return log.Wrapf(err, "Failed to write updated items to file %s", s.filename)
-	// }
+	jsonFileData, _ := json.Marshal(updatedItems)
+	_, err = f.Write(jsonFileData)
+	if err != nil {
+		return log.Wrapf(err, "Failed to write updated items to file %s", s.filename)
+	}
 
 	//written: update store now
-	// s.itemsFromFile = updatedItems
-	//return nil
+	s.itemsFromFile = updatedItems
+	return nil
 } //store.updateFile()
 
 //mockItem implements IItem but is not used in this module
