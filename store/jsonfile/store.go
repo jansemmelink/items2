@@ -164,7 +164,7 @@ func (s *store) Del(id string) error {
 
 	//make list of items without this one
 	updatedItemsFromFile := make([]fileItem, 0)
-	for _, fileItem := range updatedItemsFromFile {
+	for _, fileItem := range s.itemsFromFile {
 		if fileItem.ID != id {
 			updatedItemsFromFile = append(updatedItemsFromFile, fileItem)
 		}
@@ -178,6 +178,7 @@ func (s *store) Del(id string) error {
 	s.itemsFromFile = updatedItemsFromFile
 	delete(s.itemByID, id)
 	//not found also return success
+	log.Debugf("DEL(%s)", id)
 	return nil
 } //store.Del()
 
@@ -286,7 +287,6 @@ func (s *store) readFile(filename string) error {
 			id = s.idGen.NewID()
 			needUpdate = true
 		}
-		log.Debugf("Got [%d]: id=(%T)%v, item=(%T):%v", i, id, id, itemData, itemData)
 
 		item := itemData.(items.IItem)
 		if len(id) == 0 {

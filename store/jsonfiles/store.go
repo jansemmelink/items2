@@ -124,10 +124,7 @@ func (s *store) Add(item items.IItem) (string, error) {
 	//todo: add index functions, e.g. check for unique name in the store
 
 	//assign a new ID
-	id, err := s.NewID(item)
-	if err != nil {
-		return "", log.Wrapf(err, "cannot assign unique id to new %s", s.Name())
-	}
+	id := uuid.NewV1().String()
 
 	//make sure it does not exist
 	fn := s.itemFilename(id)
@@ -298,21 +295,4 @@ func mkdir(dir string) error {
 		return log.Wrapf(err, "os.Mkdir(%s) failed", dir)
 	}
 	return nil
-}
-
-//IItemWithID is supported if user item type implements ID() method
-//which is useful when items should not be identified by uuid but by name etc...
-type IItemWithID interface {
-	items.IItem
-	ID() string
-}
-
-func (s *store) NewID(item items.IItem) (string, error) {
-	if item == nil {
-		return "", log.Wrapf(nil, "NewID(nil)")
-	}
-	if itemWithID, ok := item.(IItemWithID); ok {
-		return itemWithID.ID(), nil
-	}
-	return uuid.NewV1().String(), nil
 }

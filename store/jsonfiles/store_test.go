@@ -16,12 +16,7 @@ func Test1(t *testing.T) {
 }
 
 type user struct {
-	id  string
 	rev int
-}
-
-func (u user) ID() string {
-	return u.id
 }
 
 func (u user) Rev() int {
