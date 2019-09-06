@@ -19,6 +19,10 @@ type IStore interface {
 	//the map index is the item id that can be used to access the item
 	//the items in the list are the list items with added _id field in JSON called ID in go
 	Find(size int, filter IItem) []IDAndItem
+
+	//when a store refers to items in another store, indicate the dependency
+	//with this, to prevent deletion of items referred to from this store
+	Uses(fieldName string, itemStore IStore) error
 }
 
 //IDAndItem ...

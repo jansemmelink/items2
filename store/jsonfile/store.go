@@ -120,6 +120,10 @@ func (s *store) Add(item items.IItem) (string, error) {
 	}
 	s.itemByID[id] = item
 	log.Debugf("ADD(%s)", id)
+
+	if addedItem, ok := item.(items.IItemWithNotifyNew); ok {
+		addedItem.NotifyNew()
+	}
 	return id, nil
 } //store.Add()
 
@@ -155,6 +159,9 @@ func (s *store) Upd(id string, item items.IItem) error {
 	s.itemsFromFile = updatedItemsFromFile
 	s.itemByID[id] = item
 	log.Debugf("UPD(%s) -> %+v", id, item)
+	if updatedItem, ok := item.(items.IItemWithNotifyUpd); ok {
+		updatedItem.NotifyUpd()
+	}
 	return nil
 } //store.Upd()
 
@@ -162,11 +169,15 @@ func (s *store) Del(id string) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
+	var deletedItem items.IItemWithNotifyDel
+
 	//make list of items without this one
 	updatedItemsFromFile := make([]fileItem, 0)
 	for _, fileItem := range s.itemsFromFile {
 		if fileItem.ID != id {
 			updatedItemsFromFile = append(updatedItemsFromFile, fileItem)
+		} else {
+			deletedItem, _ = fileItem.Item.(items.IItemWithNotifyDel)
 		}
 	}
 	//update the file contents
@@ -174,6 +185,9 @@ func (s *store) Del(id string) error {
 		return log.Wrapf(err, "failed to update JSON file")
 	}
 
+	if deletedItem != nil {
+		deletedItem.NotifyDel()
+	}
 	//deleted: update store
 	s.itemsFromFile = updatedItemsFromFile
 	delete(s.itemByID, id)
@@ -334,6 +348,10 @@ func (s *store) updateFile(updatedItems []fileItem) error {
 	s.itemsFromFile = updatedItems
 	return nil
 } //store.updateFile()
+
+func (s *store) Uses(fieldName string, itemStore items.IStore) error {
+	return log.Wrapf(nil, "Not yet implemented")
+}
 
 //mockItem implements IItem but is not used in this module
 type mockItem struct {

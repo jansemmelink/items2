@@ -147,6 +147,9 @@ func (s *store) Add(item items.IItem) (string, error) {
 		return "", log.Wrapf(err, "Failed to write item to file %s", fn)
 	}
 	log.Debugf("ADD(%s)", id)
+	if addedItem, ok := item.(items.IItemWithNotifyNew); ok {
+		addedItem.NotifyNew()
+	}
 	return id, nil
 } //store.Add()
 
@@ -181,12 +184,21 @@ func (s *store) Upd(id string, item items.IItem) error {
 		return log.Wrapf(err, "failed to write item to file %s", fn)
 	}
 	log.Debugf("UPD(%s)", id)
+	if updatedItem, ok := item.(items.IItemWithNotifyUpd); ok {
+		updatedItem.NotifyUpd()
+	}
 	return nil
 } //store.Upd()
 
 func (s *store) Del(id string) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
+
+	if item, err := s.Get(id); err == nil && item != nil {
+		if deletedItem, ok := item.(items.IItemWithNotifyDel); ok {
+			deletedItem.NotifyDel()
+		}
+	}
 
 	fn := s.itemFilename(id)
 	err := os.Remove(fn)
@@ -272,6 +284,10 @@ func (s *store) newItem() items.IItem {
 func (s *store) noItem() items.IItem {
 	ni := reflect.New(s.itemType).Interface()
 	return ni.(items.IItem)
+}
+
+func (s *store) Uses(fieldName string, itemStore items.IStore) error {
+	return log.Wrapf(nil, "Not yet implemented")
 }
 
 func mkdir(dir string) error {
