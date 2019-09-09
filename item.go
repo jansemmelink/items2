@@ -18,7 +18,7 @@ type IItemWithNotifyNew interface {
 //IItemWithNotifyUpd is optional interface to implement to be notified of updated items
 type IItemWithNotifyUpd interface {
 	IItem
-	NotifyUpd()
+	NotifyUpd(old IItem)
 }
 
 //IItemWithNotifyDel is optional interface to implement to be notified of deleted items

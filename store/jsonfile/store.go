@@ -55,7 +55,7 @@ func New(filename string, name string, tmpl items.IItem, idGen IIDGenerator) (it
 	if err := s.readFile(filename); err != nil {
 		return nil, log.Wrapf(err, "cannot access items in JSON file %s", filename)
 	}
-	log.Debugf("Created JSON files store of %d %ss from file %s", len(s.itemByID), s.itemName, s.filename)
+	log.Debugf("Created JSON file store of %d %ss from file %s", len(s.itemByID), s.itemName, s.filename)
 	return s, nil
 } //New()
 
@@ -139,10 +139,12 @@ func (s *store) Upd(id string, item items.IItem) error {
 	}
 
 	//replace and update file
+	var oldItem items.IItem
 	updatedItemsFromFile := append([]fileItem{}, s.itemsFromFile...)
 	updIndex := -1
 	for index, fileItem := range updatedItemsFromFile {
 		if fileItem.ID == id {
+			oldItem = updatedItemsFromFile[index].Item
 			updatedItemsFromFile[index].Item = item
 			updIndex = index
 			break
@@ -160,7 +162,9 @@ func (s *store) Upd(id string, item items.IItem) error {
 	s.itemByID[id] = item
 	log.Debugf("UPD(%s) -> %+v", id, item)
 	if updatedItem, ok := item.(items.IItemWithNotifyUpd); ok {
-		updatedItem.NotifyUpd()
+		updatedItem.NotifyUpd(oldItem)
+	} else {
+		log.Debugf("%s(%s).notifyUpd() not implemented by %T", s.itemName, id, item)
 	}
 	return nil
 } //store.Upd()
@@ -177,7 +181,13 @@ func (s *store) Del(id string) error {
 		if fileItem.ID != id {
 			updatedItemsFromFile = append(updatedItemsFromFile, fileItem)
 		} else {
-			deletedItem, _ = fileItem.Item.(items.IItemWithNotifyDel)
+			var ok bool
+			deletedItem, ok = fileItem.Item.(items.IItemWithNotifyDel)
+			if !ok {
+				log.Debugf("%s(%s).notifyDel() not implemented by %T", s.itemName, id, fileItem.Item)
+			} else {
+				log.Debugf("%s(%s).notifyDel() is implemented by %T", s.itemName, id, fileItem.Item)
+			}
 		}
 	}
 	//update the file contents
@@ -186,7 +196,10 @@ func (s *store) Del(id string) error {
 	}
 
 	if deletedItem != nil {
+		log.Debugf("NotifyDel(%s)", id)
 		deletedItem.NotifyDel()
+	} else {
+		log.Debugf("Not calling NotifyDel(%s)", id)
 	}
 	//deleted: update store
 	s.itemsFromFile = updatedItemsFromFile
@@ -328,6 +341,17 @@ func (s *store) readFile(filename string) error {
 	//replace the old list
 	s.itemsFromFile = itemsFromFile
 	s.itemByID = itemByID
+
+	//call NotifyNew for all loaded items
+	log.Debugf("Calling notifyNew() for %d items loaded from file", len(s.itemsFromFile))
+	for _, fileItem := range s.itemsFromFile {
+		if newItem, ok := fileItem.Item.(items.IItemWithNotifyNew); ok {
+			log.Debugf("%s(%s).notifyNew() ...", s.itemName, fileItem.ID)
+			newItem.NotifyNew()
+		} else {
+			log.Debugf("%s(%s).notifyNew() not implemented by %T", s.itemName, fileItem.ID, fileItem.Item)
+		}
+	}
 	return nil
 } //store.readFile()
 
