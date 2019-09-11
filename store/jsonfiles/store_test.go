@@ -30,3 +30,7 @@ func (u user) Validate() error {
 func (u user) Match(filter items.IItem) error {
 	return nil
 }
+
+func (u user) MatchKey(key map[string]interface{}) bool {
+	return false
+}

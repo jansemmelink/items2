@@ -237,7 +237,19 @@ func (s *store) Find(size int, filter items.IItem) []items.IDAndItem {
 		}
 	} //for each item from file
 	return list
-}
+} //store.Find()
+
+func (s *store) GetBy(key map[string]interface{}) (string, items.IItem, error) {
+	//walk the items array to return first match
+	for _, fileItem := range s.itemsFromFile {
+		item := fileItem.Item
+		if item.MatchKey(key) {
+			return fileItem.ID, item, nil
+		}
+	} //for each item from file
+
+	return "", nil, log.Wrapf(nil, "%s{%v} not found", s.itemName, key)
+} //store.GetBy()
 
 func (s *store) newItem() items.IItem {
 	t := s.itemType

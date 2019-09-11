@@ -275,6 +275,10 @@ func (s *store) Find(size int, filter items.IItem) []items.IDAndItem {
 	return list
 }
 
+func (s *store) GetBy(map[string]interface{}) (string, items.IItem, error) {
+	return "", nil, log.Wrapf(nil, "NYI")
+} //store.GetBy()
+
 func (s *store) itemFilename(id string) string {
 	return fmt.Sprintf("%s/%s_%s.json", s.path, s.itemName, id)
 }

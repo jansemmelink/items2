@@ -7,6 +7,9 @@ type IItem interface {
 	//compare known specified fields in the other item (same type as you)
 	// and return nil if match, else error to say what does not match
 	Match(filter IItem) error
+
+	//do exact comparison with specified fields
+	MatchKey(key map[string]interface{}) bool
 }
 
 //IItemWithNotifyNew is optional interface to implement to be notified of new items
