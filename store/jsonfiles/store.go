@@ -132,7 +132,7 @@ func (s *store) Add(item items.IItem) (string, error) {
 		return "", log.Wrapf(err, "%s.id=%s already exists", s.Name(), id)
 	}
 
-	jsonItem, err := json.Marshal(item)
+	jsonItem, err := json.MarshalIndent(item, "", "  ")
 	if err != nil {
 		return "", log.Wrapf(err, "Failed to JSON encode item")
 	}
@@ -172,7 +172,7 @@ func (s *store) Upd(id string, item items.IItem) error {
 	//load old item - needed when calling NotifyUpd
 	oldItem, err := s.Get(id)
 
-	jsonItem, err := json.Marshal(item)
+	jsonItem, err := json.MarshalIndent(item, "", "  ")
 	if err != nil {
 		return log.Wrapf(err, "failed to JSON encode item")
 	}

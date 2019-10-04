@@ -374,7 +374,7 @@ func (s *store) updateFile(updatedItems []fileItem) error {
 	}
 	defer f.Close()
 
-	jsonFileData, _ := json.Marshal(updatedItems)
+	jsonFileData, _ := json.MarshalIndent(updatedItems, "", "  ")
 	_, err = f.Write(jsonFileData)
 	if err != nil {
 		return log.Wrapf(err, "Failed to write updated items to file %s", s.filename)
