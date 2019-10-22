@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"path"
 	"reflect"
 	"regexp"
 	"sync"
 
+	"github.com/fsnotify/fsnotify"
 	items "github.com/jansemmelink/items2"
 	"github.com/jansemmelink/log"
 )
@@ -29,6 +31,7 @@ var (
 
 //New makes a new items.IStore using a single JSON file
 func New(filename string, name string, tmpl items.IItem, idGen IIDGenerator) (items.IStore, error) {
+	filename = path.Clean(filename)
 	if len(name) == 0 || !validName.MatchString(name) {
 		return nil, log.Wrapf(nil, "New(name==%s) invalid identifier", name)
 	}
@@ -55,6 +58,10 @@ func New(filename string, name string, tmpl items.IItem, idGen IIDGenerator) (it
 	if err := s.readFile(filename); err != nil {
 		return nil, log.Wrapf(err, "cannot access items in JSON file %s", filename)
 	}
+
+	//watch the file for changes and reload
+	s.watchFile(filename)
+
 	log.Debugf("Created JSON file store of %d %ss from file %s", len(s.itemByID), s.itemName, s.filename)
 	return s, nil
 } //New()
@@ -70,6 +77,8 @@ type store struct {
 	idGen         IIDGenerator
 	itemsFromFile []fileItem
 	itemByID      map[string]items.IItem
+
+	watcher *fsnotify.Watcher
 }
 
 //Name ...
@@ -223,6 +232,7 @@ func (s *store) Get(id string) (items.IItem, error) {
 func (s *store) Find(size int, filter items.IItem) []items.IDAndItem {
 	//do not lock, because we use Get() inside this func...
 	//walk the items array to return in the order of the file
+	log.Debugf("Find among %d items...", len(s.itemsFromFile))
 	list := make([]items.IDAndItem, 0)
 	for _, fileItem := range s.itemsFromFile {
 		if filter != nil {
@@ -366,6 +376,50 @@ func (s *store) readFile(filename string) error {
 	}
 	return nil
 } //store.readFile()
+
+func (s *store) watchFile(filename string) error {
+	var err error
+	s.watcher, err = fsnotify.NewWatcher()
+	if err != nil {
+		return log.Wrapf(err, "Error creating file watcher")
+	}
+
+	//process file events
+	go func(s *store, filename string) {
+		for {
+			select {
+			case event := <-s.watcher.Events:
+				if event.Name == filename {
+					log.Infof("File event: %s %s", event.Name, event.String())
+					// We only care about this
+					if event.Op == fsnotify.Write {
+						err = s.readFile(filename)
+						if err != nil {
+							log.Errorf("Reload failed: %v", err)
+						} else {
+							log.Errorf("Reloaded %s", filename)
+						}
+					} else {
+						log.Debugf("Ignore %s != Write on %s", event.Op, event.Name)
+					}
+				} else {
+					log.Debugf("Ignore %s on %s != %s", event.Op, event.Name, filename)
+				}
+
+			case err := <-s.watcher.Errors:
+				log.Errorf("File Watcher failed: %v", err)
+			}
+		}
+	}(s, filename)
+
+	//start watching dir - then we just ignore events for any other files
+	dir := path.Dir(filename)
+	if err = s.watcher.Add(dir); err != nil {
+		return log.Wrapf(err, "Failed to watch dir=%s", dir)
+	}
+
+	return nil
+} //store.watchFile()
 
 func (s *store) updateFile(updatedItems []fileItem) error {
 	f, err := os.Create(s.filename)
