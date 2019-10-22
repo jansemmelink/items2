@@ -29,8 +29,22 @@ var (
 	validName = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9-_]*[a-zA-Z0-9]$`)
 )
 
+//NewWithReload is same as New() then WatchFile()
+func NewWithReload(filename string, reloadfilename string, name string, tmpl items.IItem, idGen IIDGenerator) (items.IStore, error) {
+	s, err := newStore(filename, name, tmpl, idGen)
+	if err != nil {
+		return nil, err
+	}
+	s.watchFile(reloadfilename)
+	return s, nil
+}
+
 //New makes a new items.IStore using a single JSON file
 func New(filename string, name string, tmpl items.IItem, idGen IIDGenerator) (items.IStore, error) {
+	return newStore(filename, name, tmpl, idGen)
+}
+
+func newStore(filename string, name string, tmpl items.IItem, idGen IIDGenerator) (*store, error) {
 	filename = path.Clean(filename)
 	if len(name) == 0 || !validName.MatchString(name) {
 		return nil, log.Wrapf(nil, "New(name==%s) invalid identifier", name)
@@ -58,9 +72,6 @@ func New(filename string, name string, tmpl items.IItem, idGen IIDGenerator) (it
 	if err := s.readFile(filename); err != nil {
 		return nil, log.Wrapf(err, "cannot access items in JSON file %s", filename)
 	}
-
-	//watch the file for changes and reload
-	s.watchFile(filename)
 
 	log.Debugf("Created JSON file store of %d %ss from file %s", len(s.itemByID), s.itemName, s.filename)
 	return s, nil
@@ -232,7 +243,7 @@ func (s *store) Get(id string) (items.IItem, error) {
 func (s *store) Find(size int, filter items.IItem) []items.IDAndItem {
 	//do not lock, because we use Get() inside this func...
 	//walk the items array to return in the order of the file
-	log.Debugf("Find among %d items...", len(s.itemsFromFile))
+	log.Debugf("Find among %d %s items...", len(s.itemsFromFile), s.Name())
 	list := make([]items.IDAndItem, 0)
 	for _, fileItem := range s.itemsFromFile {
 		if filter != nil {
@@ -282,6 +293,9 @@ type IIDGenerator interface {
 
 //read the file into the store, replacing old contents on success only
 func (s *store) readFile(filename string) error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
 	//if file does not exist, we can create the file later, but we need to ensure
 	//we can access and create the file, so read/create it now...
 	if _, err := os.Stat(filename); err != nil {
