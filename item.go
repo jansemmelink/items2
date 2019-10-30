@@ -12,6 +12,12 @@ type IItem interface {
 	MatchKey(key map[string]interface{}) bool
 }
 
+//IItemWithUniqueKeys is optional interface to implement if item has unique keys
+type IItemWithUniqueKeys interface {
+	IItem
+	Keys() map[string]interface{}
+}
+
 //IItemWithNotifyNew is optional interface to implement to be notified of new items
 type IItemWithNotifyNew interface {
 	IItem

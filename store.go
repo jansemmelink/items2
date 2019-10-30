@@ -17,6 +17,13 @@ type IStore interface {
 
 	//get item by exact match of specified fields, e.g. get by name
 	//returns id and item of first match if there are more than one
+	//all keys specified must match and key names and values are case-sensitive
+	//-----
+	//todo: if item implements UniqueKeys with Keys() method, those keys
+	//are indexed and will speed up search. If not, search is an iteration
+	//over all items in the store doing MatchKey()
+	//for now: always iterate... todo to use index...
+	//-----
 	GetBy(map[string]interface{}) (string, IItem, error)
 
 	//Find returns a list of items, limited by size and applying the optional filter item
