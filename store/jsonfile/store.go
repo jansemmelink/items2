@@ -361,10 +361,10 @@ func (s *store) readFile(filename string) error {
 		itemData := fileItemValue.Field(1).Interface()
 
 		//hack for reload of pre-_id-files
-		if len(id) == 0 {
-			id = s.idGen.NewID()
-			needUpdate = true
-		}
+		// if len(id) == 0 {
+		// 	id = s.idGen.NewID()
+		// 	needUpdate = true
+		// }
 
 		item := itemData.(items.IItem)
 		if len(id) == 0 {
@@ -378,6 +378,9 @@ func (s *store) readFile(filename string) error {
 			return log.Wrapf(err, "file %s %s[%d].id=%s is invalid", filename, s.Name(), i, id)
 		}
 
+		if err := s.AddToIndex(id, item); err != nil {
+			return log.Wrapf(err, "file %s %s[%d].id=%s has duplicate key(s)", filename, s.Name(), i, id)
+		}
 		itemsFromFile = append(itemsFromFile, fileItem{ID: id, Item: item})
 		itemByID[id] = item
 		log.Debugf("LOADED %s[%d]: id=%s: %+v", filename, i, id, item)
@@ -541,9 +544,11 @@ func (s *store) CheckUniqueness(id string, i items.IItem) error {
 	return nil
 }
 
-func (s *store) AddToIndex(id string, i items.IItem) {
+func (s *store) AddToIndex(id string, i items.IItem) error {
 	if itemWithUniqueKeys, ok := i.(items.IItemWithUniqueKeys); ok {
 		keys := itemWithUniqueKeys.Keys()
+
+		//check before adding
 		for n, v := range keys {
 			//create index if not exist
 			index, ok := s.index[n]
@@ -551,11 +556,23 @@ func (s *store) AddToIndex(id string, i items.IItem) {
 				index = newIndex()
 				s.index[n] = index
 			}
+			if existingID, ok := index[v]; ok {
+				if existingID != id {
+					return log.Wrapf(nil, "%s.id=%s duplicate on %s=%v",
+						s.Name(), id, n, v)
+				}
+			}
+		} //for each item.key
+
+		//no duplicates: add all keys
+		for n, v := range keys {
+			index, _ := s.index[n]
 			index[v] = id
 			log.Debugf("Added index(%s)[%v]=item", n, v)
-		}
+		} //for each item.key
 	}
-}
+	return nil
+} //store.AddToIndex()
 
 func (s *store) DelFromIndex(id string, i items.IItem) {
 	if itemWithUniqueKeys, ok := i.(items.IItemWithUniqueKeys); ok {
@@ -565,11 +582,11 @@ func (s *store) DelFromIndex(id string, i items.IItem) {
 			index, ok := s.index[n]
 			if ok {
 				delete(index, v)
-				log.Debugf("Removed index(%s)[%v]=item", n, v)
+				log.Debugf("Removed index(%s)[%v]=item.id=%s", n, v, id)
 			}
 		}
 	}
-}
+} //store.DelFromIndex()
 
 func newIndex() itemIndex {
 	return make(map[interface{}]string)
