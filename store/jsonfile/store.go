@@ -169,7 +169,7 @@ func (s *store) Upd(id string, item items.IItem) error {
 		return log.Wrapf(err, "cannot upd invalid item")
 	}
 
-	if err := s.CheckUniqueness("", item); err != nil {
+	if err := s.CheckUniqueness(id, item); err != nil {
 		return log.Wrapf(err, "upd will make a duplicate")
 	}
 
