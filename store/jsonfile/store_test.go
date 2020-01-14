@@ -1,9 +1,14 @@
 package jsonfile_test
 
 import (
+	"bytes"
+	"crypto/md5"
 	"fmt"
+	"io"
 	"os"
+	"strings"
 	"testing"
+	"time"
 
 	items "github.com/jansemmelink/items2"
 	"github.com/jansemmelink/items2/store/jsonfile"
@@ -12,7 +17,9 @@ import (
 )
 
 func Test1(t *testing.T) {
-	s1, err := jsonfile.New("./share/users.json", "user", user{}, idGen{})
+	filename := "./share/users.json"
+	os.Remove(filename)
+	s1, err := jsonfile.New(filename, "user", user{}, idGen{})
 	if err != nil {
 		t.Fatalf("Failed to create s1: %+v", err)
 	}
@@ -85,6 +92,9 @@ type user struct {
 }
 
 func (u user) Validate() error {
+	if len(u.Name) == 0 {
+		return log.Wrapf(nil, "user.name not specified")
+	}
 	return nil
 }
 
@@ -202,4 +212,140 @@ func TestUniqueKeys(t *testing.T) {
 
 	//there should be only two items in the store and in the name index
 	//but not yet testing this...
+}
+
+func TestFileUpdate(t *testing.T) {
+	log.DebugOn()
+	//delete the file to start with blank db
+	filename := "./share/users.json"
+	loadfilename := "./share/load/users.json"
+	errorFilename := strings.Replace(loadfilename, ".json", ".err", 1)
+
+	os.Mkdir("./share/load", 0770)
+	os.Remove(filename)
+	s1, err := jsonfile.NewWithReload(filename, loadfilename, "user", user{}, idGen{})
+	if err != nil {
+		t.Fatalf("Failed to create s1: %+v", err)
+	}
+	log.Debugf("Created s1: %s", s1.Name())
+
+	if list := s1.Find(100, nil); len(list) != 0 {
+		t.Fatalf("Got %d instead of 0", len(list))
+	}
+
+	//update the load file - still no items
+	updateFile(t, loadfilename, `[]`)
+	if list := s1.Find(100, nil); len(list) != 0 {
+		t.Fatalf("Got %d instead of 0", len(list))
+	}
+
+	//update the load file - with one item
+	updateFile(t, loadfilename, `[{"_id":"f8f47a3e-3601-11ea-8045-f45c89a88a57","item": {"name": "A", "rev":1}}]`)
+	time.Sleep(time.Second)
+	if list := s1.Find(100, nil); len(list) != 1 {
+		t.Fatalf("Got %d instead of 1", len(list))
+	}
+	if !sameFileContents(t, filename, loadfilename) {
+		t.Fatalf("Different contents in file %s and %s", filename, loadfilename)
+	}
+
+	//update the load file - with invalid item
+	updateFile(t, loadfilename, `[{"_id":"f8f47a3e-3601-11ea-8045-f45c89a88a57","item": {"name": "", "rev":2}}]`)
+	time.Sleep(time.Second)
+	if list := s1.Find(100, nil); len(list) != 1 { //still expect old item to exist
+		t.Fatalf("Got %d instead of 1", len(list))
+	} else {
+		u1, ok := list[0].Item.(user)
+		if !ok || u1.Rev != 1 || u1.Name != "A" {
+			t.Fatalf("Invalid update broke u1:%+v", u1)
+		}
+	}
+	if sameFileContents(t, filename, loadfilename) { //should now be different
+		t.Fatalf("Same contents in file %s and %s after invalid update", filename, loadfilename)
+	}
+	//check error file - should indicate invalid name ""
+	checkErrorfile(t, errorFilename, "user.name not specified")
+
+	//corrent the mistake, updating the item with a new name and rev
+	updateFile(t, loadfilename, `[{"_id":"f8f47a3e-3601-11ea-8045-f45c89a88a57","item": {"name": "B", "rev":3}}]`)
+	time.Sleep(time.Second)
+	if list := s1.Find(100, nil); len(list) != 1 { //still expect old item to exist
+		t.Fatalf("Got %d instead of 1", len(list))
+	} else {
+		u1, ok := list[0].Item.(user)
+		if !ok || u1.Rev != 3 || u1.Name != "B" {
+			t.Fatalf("Update not applied to u1:%+v", u1)
+		}
+	}
+	if !sameFileContents(t, filename, loadfilename) { //should now be same
+		t.Fatalf("Different contents in file %s and %s after update", filename, loadfilename)
+	}
+	//check error file must be deleted
+	if _, err := os.Stat(errorFilename); err == nil {
+		t.Fatalf("Error file %s still exists", errorFilename)
+	}
+}
+
+func updateFile(t *testing.T, filename string, json string) {
+	f, err := os.Create(filename)
+	if err != nil {
+		t.Fatalf("Failed to open file %s: %v", filename, err)
+	}
+	defer f.Close()
+
+	if _, err := f.Write([]byte(json)); err != nil {
+		t.Fatalf("Failed to write to file %s: %v", filename, err)
+	}
+	t.Logf("Updated %s", filename)
+}
+
+func sameFileContents(t *testing.T, f1, f2 string) bool {
+	md5_1 := fileMD5(t, f1)
+	md5_2 := fileMD5(t, f2)
+	return md5_1 == md5_2
+}
+
+func fileMD5(t *testing.T, filename string) string {
+	f, err := os.Open(filename)
+	if err != nil {
+		t.Fatalf("Failed to open file %s: %v", filename, err)
+		return ""
+	}
+	defer f.Close()
+
+	h := md5.New()
+	if _, err := io.Copy(h, f); err != nil {
+		t.Fatalf("Failed to copy file contents: %v", err)
+		return ""
+	}
+
+	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
+func checkErrorfile(t *testing.T, filename string, textToFind string) {
+	f, err := os.Open(filename)
+	if err != nil {
+		t.Fatalf("Failed to open %s: %v", filename, err)
+	}
+	defer f.Close()
+
+	x := bytes.NewBuffer(nil)
+	io.Copy(x, f)
+	errorString := ""
+	for {
+		line, err := x.ReadString(byte('\n'))
+		if len(line) > 0 {
+			//log.Debugf("READ: %v", string(line))
+			errorString += string(line)
+		}
+		if err != nil {
+			break
+		}
+	} //for
+
+	if strings.Index(errorString, textToFind) < 0 {
+		t.Fatalf("Error file %s does not say \"%s\"", filename, textToFind)
+	}
+
+	t.Logf("Error file %s indicates \"%s\"", filename, textToFind)
 }

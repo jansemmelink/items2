@@ -3,11 +3,13 @@ package jsonfile
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path"
 	"reflect"
 	"regexp"
+	"strings"
 	"sync"
 
 	"github.com/fsnotify/fsnotify"
@@ -418,6 +420,7 @@ func (s *store) watchFile(filename string) error {
 
 	//process file events
 	go func(s *store, filename string) {
+		filename = path.Clean(filename)
 		for {
 			select {
 			case event := <-s.watcher.Events:
@@ -425,11 +428,44 @@ func (s *store) watchFile(filename string) error {
 					log.Infof("File event: %s %s", event.Name, event.String())
 					// We only care about this
 					if event.Op == fsnotify.Write {
+						errorFilename := strings.Replace(filename, ".json", ".err", 1)
 						err = s.readFile(filename)
 						if err != nil {
 							log.Errorf("Reload failed: %v", err)
+
+							//write error file
+							if f, ferr := os.Create(errorFilename); ferr == nil {
+								defer f.Close()
+								f.Write([]byte(fmt.Sprintf("Reload failed: %+v", err)))
+								log.Debugf("Wrote %s", errorFilename)
+							} else {
+								log.Errorf("Failed to create %s: %+v", errorFilename, ferr)
+							}
 						} else {
 							log.Errorf("Reloaded %s", filename)
+							os.Remove(errorFilename)
+
+							//copy file to replace store file
+							err := func(to, from string) error {
+								f1, err := os.Open(from)
+								if err != nil {
+									return log.Wrapf(err, "Failed to open %s", from)
+								}
+								defer f1.Close()
+								f2, err := os.Create(to)
+								if err != nil {
+									return log.Wrapf(err, "Failed to create %s", to)
+								}
+								defer f2.Close()
+								if _, err := io.Copy(f2, f1); err != nil {
+									return log.Wrapf(err, "Failed to copy %s to %s", from, to)
+								}
+								log.Debugf("Copied %s to %s", from, to)
+								return nil
+							}(s.filename, filename)
+							if err != nil {
+								log.Errorf("Failed to copy loaded file %s into store file %s: %v", filename, s.filename, err)
+							}
 						}
 					} else {
 						log.Debugf("Ignore %s != Write on %s", event.Op, event.Name)
