@@ -360,15 +360,6 @@ func (s *store) readFile(filename string) error {
 	for i := 0; i < itemSlicePtrValue.Elem().Len(); i++ {
 		fileItemValue := itemSlicePtrValue.Elem().Index(i)
 		id := fileItemValue.Field(0).Interface().(string)
-		itemData := fileItemValue.Field(1).Interface()
-
-		//hack for reload of pre-_id-files
-		// if len(id) == 0 {
-		// 	id = s.idGen.NewID()
-		// 	needUpdate = true
-		// }
-
-		item := itemData.(items.IItem)
 		if len(id) == 0 {
 			return log.Wrapf(nil, "Missing id in file %s %s[%d]", filename, s.Name(), i)
 		}
@@ -376,6 +367,11 @@ func (s *store) readFile(filename string) error {
 			return log.Wrapf(nil, "Duplicate id in file %s %s[%d].id=\"%s\"", filename, s.Name(), i, id)
 		}
 
+		if fileItemValue.Field(1).IsNil() {
+			return log.Wrapf(nil, "item[%d].id=%s has no item data", i, id)
+		}
+		itemData := fileItemValue.Field(1).Interface()
+		item := itemData.(items.IItem)
 		if err := item.Validate(); err != nil {
 			return log.Wrapf(err, "file %s %s[%d].id=%s is invalid", filename, s.Name(), i, id)
 		}
@@ -425,9 +421,10 @@ func (s *store) watchFile(filename string) error {
 			select {
 			case event := <-s.watcher.Events:
 				if event.Name == filename {
-					log.Infof("File event: %s %s", event.Name, event.String())
 					// We only care about this
-					if event.Op == fsnotify.Write {
+					if event.Op == fsnotify.Write || //write when: cp ... load/<file>
+						event.Op == fsnotify.Chmod { //chmod when: touch load/<file>
+						log.Infof("%s: %s", event.Op, event.Name)
 						errorFilename := strings.Replace(filename, ".json", ".err", 1)
 						err = s.readFile(filename)
 						if err != nil {
@@ -471,7 +468,7 @@ func (s *store) watchFile(filename string) error {
 						log.Debugf("Ignore %s != Write on %s", event.Op, event.Name)
 					}
 				} else {
-					log.Debugf("Ignore %s on %s != %s", event.Op, event.Name, filename)
+					log.Tracef("Ignore %s on %s != %s", event.Op, event.Name, filename)
 				}
 
 			case err := <-s.watcher.Errors:
