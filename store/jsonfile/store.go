@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/fsnotify/fsnotify"
 	items "github.com/jansemmelink/items2"
@@ -408,81 +409,84 @@ func (s *store) readFile(filename string) error {
 } //store.readFile()
 
 func (s *store) watchFile(filename string) error {
-	var err error
-	s.watcher, err = fsnotify.NewWatcher()
-	if err != nil {
-		return log.Wrapf(err, "Error creating file watcher")
-	}
+	//not using fsnotify.NewWatcher() anymore, because we only watch one file,
+	//and want to trigger after the file changes stopped, not when it starts
+	//so doing io.Stat() instead at regular intervals
 
-	//process file events
-	go func(s *store, filename string) {
-		filename = path.Clean(filename)
-		for {
-			select {
-			case event := <-s.watcher.Events:
-				if event.Name == filename {
-					// We only care about this
-					if event.Op == fsnotify.Write || //write when: cp ... load/<file>
-						event.Op == fsnotify.Chmod { //chmod when: touch load/<file>
-						log.Infof("%s: %s", event.Op, event.Name)
-						errorFilename := strings.Replace(filename, ".json", ".err", 1)
-						err = s.readFile(filename)
-						if err != nil {
-							log.Errorf("Reload failed: %v", err)
+	processModifiedFile := func(filename string) {
+		log.Infof("Processing: %s", filename)
+		errorFilename := strings.Replace(filename, ".json", ".err", 1)
+		err := s.readFile(filename)
+		if err != nil {
+			log.Errorf("Reload failed: %v", err)
 
-							//write error file
-							if f, ferr := os.Create(errorFilename); ferr == nil {
-								defer f.Close()
-								f.Write([]byte(fmt.Sprintf("Reload failed: %+v", err)))
-								log.Debugf("Wrote %s", errorFilename)
-							} else {
-								log.Errorf("Failed to create %s: %+v", errorFilename, ferr)
-							}
-						} else {
-							log.Errorf("Reloaded %s", filename)
-							os.Remove(errorFilename)
+			//write error file
+			if f, ferr := os.Create(errorFilename); ferr == nil {
+				defer f.Close()
+				f.Write([]byte(fmt.Sprintf("Reload failed: %+v", err)))
+				log.Debugf("Wrote %s", errorFilename)
+			} else {
+				log.Errorf("Failed to create %s: %+v", errorFilename, ferr)
+			}
+		} else {
+			log.Errorf("Reloaded %s", filename)
+			os.Remove(errorFilename)
 
-							//copy file to replace store file
-							err := func(to, from string) error {
-								f1, err := os.Open(from)
-								if err != nil {
-									return log.Wrapf(err, "Failed to open %s", from)
-								}
-								defer f1.Close()
-								f2, err := os.Create(to)
-								if err != nil {
-									return log.Wrapf(err, "Failed to create %s", to)
-								}
-								defer f2.Close()
-								if _, err := io.Copy(f2, f1); err != nil {
-									return log.Wrapf(err, "Failed to copy %s to %s", from, to)
-								}
-								log.Debugf("Copied %s to %s", from, to)
-								return nil
-							}(s.filename, filename)
-							if err != nil {
-								log.Errorf("Failed to copy loaded file %s into store file %s: %v", filename, s.filename, err)
-							}
-						}
-					} else {
-						log.Debugf("Ignore %s != Write on %s", event.Op, event.Name)
-					}
-				} else {
-					log.Tracef("Ignore %s on %s != %s", event.Op, event.Name, filename)
+			//copy file to replace store file
+			err := func(to, from string) error {
+				f1, err := os.Open(from)
+				if err != nil {
+					return log.Wrapf(err, "Failed to open %s", from)
 				}
-
-			case err := <-s.watcher.Errors:
-				log.Errorf("File Watcher failed: %v", err)
+				defer f1.Close()
+				f2, err := os.Create(to)
+				if err != nil {
+					return log.Wrapf(err, "Failed to create %s", to)
+				}
+				defer f2.Close()
+				if _, err := io.Copy(f2, f1); err != nil {
+					return log.Wrapf(err, "Failed to copy %s to %s", from, to)
+				}
+				log.Debugf("Copied %s to %s", from, to)
+				return nil
+			}(s.filename, filename)
+			if err != nil {
+				log.Errorf("Failed to copy loaded file %s into store file %s: %v", filename, s.filename, err)
 			}
 		}
-	}(s, filename)
+	} //processModifiedFile()
 
-	//start watching dir - then we just ignore events for any other files
-	dir := path.Dir(filename)
-	if err = s.watcher.Add(dir); err != nil {
-		return log.Wrapf(err, "Failed to watch dir=%s", dir)
-	}
+	go func(filename string) {
+		lastModTime := time.Now()
+		changing := false
+		for {
+			if info, err := os.Stat(filename); err == nil {
+				if info.ModTime().After(lastModTime) {
+					//detect a change
+					changing = true
+					lastModTime = info.ModTime()
+				}
+			} //if got file info
 
+			//detect changes stopped for 3 seconds
+			if changing && time.Now().After(lastModTime.Add(time.Second*3)) {
+				log.Debugf("RELOADING %s ...", filename)
+				processModifiedFile(filename)
+				changing = false
+			} else {
+				if changing {
+					log.Tracef("CHANGING  %s ...", filename)
+				} else {
+					log.Tracef("NO CHANGE %s ...", filename)
+				}
+			}
+
+			//wait before checking again...
+			time.Sleep(time.Second)
+		} //forever...
+	}(path.Clean(filename))
+
+	log.Debugf("Watching %s...", filename)
 	return nil
 } //store.watchFile()
 
