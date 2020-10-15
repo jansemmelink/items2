@@ -70,7 +70,7 @@ func newStore(filename string, name string, tmpl items.IItem, idGen IIDGenerator
 		idGen:         idGen,
 		itemsFromFile: make([]fileItem, 0),
 		itemByID:      make(map[string]items.IItem),
-		index:         make(map[string]itemIndex),
+		indexSet:      newIndexSet(name),
 	}
 
 	if err := s.readFile(filename); err != nil {
@@ -92,14 +92,10 @@ type store struct {
 	idGen         IIDGenerator
 	itemsFromFile []fileItem
 	itemByID      map[string]items.IItem
-	index         map[string]itemIndex
+	indexSet      indexSet
 
 	watcher *fsnotify.Watcher
 }
-
-//index stores the id
-//get the item from itemByID[<id>]
-type itemIndex map[interface{}]string
 
 //Name ...
 func (s *store) Name() string {
@@ -135,7 +131,7 @@ func (s *store) Add(item items.IItem) (string, error) {
 		return "", log.Wrapf(err, "cannot add invalid item")
 	}
 
-	if err := s.CheckUniqueness("", item); err != nil {
+	if err := s.indexSet.CheckUniqueness("", item); err != nil {
 		return "", log.Wrapf(err, "cannot add duplicate")
 	}
 
@@ -151,7 +147,7 @@ func (s *store) Add(item items.IItem) (string, error) {
 		return "", log.Wrapf(err, "failed to update JSON file")
 	}
 	s.itemByID[id] = item
-	s.AddToIndex(id, item)
+	s.indexSet.AddToIndex(id, item)
 
 	log.Debugf("ADD(%s)", id)
 
@@ -172,7 +168,7 @@ func (s *store) Upd(id string, item items.IItem) error {
 		return log.Wrapf(err, "cannot upd invalid item")
 	}
 
-	if err := s.CheckUniqueness(id, item); err != nil {
+	if err := s.indexSet.CheckUniqueness(id, item); err != nil {
 		return log.Wrapf(err, "upd will make a duplicate")
 	}
 
@@ -195,11 +191,11 @@ func (s *store) Upd(id string, item items.IItem) error {
 	if err := s.updateFile(updatedItemsFromFile); err != nil {
 		return log.Wrapf(err, "failed to update JSON file")
 	}
-	s.DelFromIndex(id, oldItem)
+	s.indexSet.DelFromIndex(id, oldItem)
 
 	s.itemsFromFile = updatedItemsFromFile
 	s.itemByID[id] = item
-	s.AddToIndex(id, item)
+	s.indexSet.AddToIndex(id, item)
 	log.Debugf("UPD(%s) -> %+v", id, item)
 	if updatedItem, ok := item.(items.IItemWithNotifyUpd); ok {
 		updatedItem.NotifyUpd(oldItem)
@@ -230,7 +226,7 @@ func (s *store) Del(id string) error {
 		if err := s.updateFile(updatedItemsFromFile); err != nil {
 			return log.Wrapf(err, "failed to update JSON file")
 		}
-		s.DelFromIndex(id, deletedItem)
+		s.indexSet.DelFromIndex(id, deletedItem)
 		if deletedItemWithNotify, ok := deletedItem.(items.IItemWithNotifyDel); ok {
 			log.Debugf("NotifyDel(%s)", id)
 			deletedItemWithNotify.NotifyDel()
@@ -354,13 +350,16 @@ func (s *store) readFile(filename string) error {
 		return nil
 	}
 
-	//copy into array and id-map and ensure ids are unique
+	//copy into array and id-map and build new set of indexes to ensure ids are unique
+	//(still not updating the store)
 	itemsFromFile := make([]fileItem, 0)
 	itemByID := make(map[string]items.IItem)
+	indexSet := newIndexSet(s.itemName)
 	needUpdate := false
 	for i := 0; i < itemSlicePtrValue.Elem().Len(); i++ {
 		fileItemValue := itemSlicePtrValue.Elem().Index(i)
 		id := fileItemValue.Field(0).Interface().(string)
+		log.Debugf("add [%d] id=%s  (has %d)", i, id, len(itemByID))
 		if len(id) == 0 {
 			return log.Wrapf(nil, "Missing id in file %s %s[%d]", filename, s.Name(), i)
 		}
@@ -377,12 +376,45 @@ func (s *store) readFile(filename string) error {
 			return log.Wrapf(err, "file %s %s[%d].id=%s is invalid", filename, s.Name(), i, id)
 		}
 
-		if err := s.AddToIndex(id, item); err != nil {
-			return log.Wrapf(err, "file %s %s[%d].id=%s has duplicate key(s)", filename, s.Name(), i, id)
+		//add to new index, list and map:
+		if err := indexSet.AddToIndex(id, item); err != nil {
+			return log.Wrapf(err, "file %s %s.id=%s has duplicate key", filename, s.Name(), id)
 		}
 		itemsFromFile = append(itemsFromFile, fileItem{ID: id, Item: item})
 		itemByID[id] = item
 		log.Debugf("LOADED %s[%d]: id=%s: %+v", filename, i, id, item)
+	}
+
+	//notify the application about upd/del changes first
+	for id, oldItem := range s.itemByID {
+		//see if exists in new file
+		if newItem, ok := itemByID[id]; ok {
+			if updatedItemWithNotify, ok := newItem.(items.IItemWithNotifyUpd); ok {
+				log.Debugf("NotifyUpd(%s)", id)
+				updatedItemWithNotify.NotifyUpd(oldItem)
+			} else {
+				log.Debugf("Not calling NotifyUpd(%s)", id)
+			}
+		} else {
+			if deletedItemWithNotify, ok := oldItem.(items.IItemWithNotifyDel); ok {
+				log.Debugf("NotifyDel(%s)", id)
+				deletedItemWithNotify.NotifyDel()
+			} else {
+				log.Debugf("Not calling NotifyDel(%s)", id)
+			}
+		}
+	}
+
+	//notify the application about new items next
+	for id, newItem := range itemByID {
+		if _, ok := s.itemByID[id]; !ok {
+			if addedItemWithNotify, ok := newItem.(items.IItemWithNotifyNew); ok {
+				log.Debugf("NotifyNew(%s)", id)
+				addedItemWithNotify.NotifyNew()
+			} else {
+				log.Debugf("Not calling NotifyNew(%s)", id)
+			}
+		}
 	}
 
 	if needUpdate {
@@ -391,20 +423,10 @@ func (s *store) readFile(filename string) error {
 		}
 	}
 
-	//replace the old list
+	//replace the old list, map and indexSet
 	s.itemsFromFile = itemsFromFile
 	s.itemByID = itemByID
-
-	//call NotifyNew for all loaded items
-	log.Debugf("Calling notifyNew() for %d items loaded from file", len(s.itemsFromFile))
-	for _, fileItem := range s.itemsFromFile {
-		if newItem, ok := fileItem.Item.(items.IItemWithNotifyNew); ok {
-			log.Debugf("%s(%s).notifyNew() ...", s.itemName, fileItem.ID)
-			newItem.NotifyNew()
-		} else {
-			log.Debugf("%s(%s).notifyNew() not implemented by %T", s.itemName, fileItem.ID, fileItem.Item)
-		}
-	}
+	s.indexSet = indexSet
 	return nil
 } //store.readFile()
 
@@ -546,7 +568,19 @@ func fileItemType(itemType reflect.Type) reflect.Type {
 	return reflect.StructOf(structFields)
 }
 
-func (s *store) CheckUniqueness(id string, i items.IItem) error {
+func newIndexSet(name string) indexSet {
+	return indexSet{
+		name:  name,
+		index: make(map[string]itemIndex),
+	}
+}
+
+type indexSet struct {
+	name  string
+	index map[string]itemIndex
+}
+
+func (s *indexSet) CheckUniqueness(id string, i items.IItem) error {
 	//if i.id is defined, do not compare with self (e.g. during item update)
 	//if i.id is not defined, its a new item that must be checked against all items
 	if itemWithUniqueKeys, ok := i.(items.IItemWithUniqueKeys); ok {
@@ -564,13 +598,13 @@ func (s *store) CheckUniqueness(id string, i items.IItem) error {
 					//if this item has no id, this is a new item and it will
 					//be duplicate key
 					if len(id) == 0 {
-						return log.Wrapf(nil, "duplicate key: %s:{%s:%v}", s.Name(), n, v)
+						return log.Wrapf(nil, "duplicate key: %s:{%s:%v}", s.name, n, v)
 					}
 
 					//item has an id, so we're busy updating an existing item:
 					//this is only duplicate if the indexed item is not this item
 					if otherItemID != id {
-						return log.Wrapf(nil, "duplicate key: %s:{%s:%v} same as %s:{id:%s}", s.Name(), n, v, s.Name(), otherItemID)
+						return log.Wrapf(nil, "duplicate key: %s:{%s:%v} same as %s:{id:%s}", s.name, n, v, s.name, otherItemID)
 					}
 				}
 			}
@@ -581,7 +615,7 @@ func (s *store) CheckUniqueness(id string, i items.IItem) error {
 	return nil
 }
 
-func (s *store) AddToIndex(id string, i items.IItem) error {
+func (s *indexSet) AddToIndex(id string, i items.IItem) error {
 	if itemWithUniqueKeys, ok := i.(items.IItemWithUniqueKeys); ok {
 		keys := itemWithUniqueKeys.Keys()
 
@@ -596,7 +630,7 @@ func (s *store) AddToIndex(id string, i items.IItem) error {
 			if existingID, ok := index[v]; ok {
 				if existingID != id {
 					return log.Wrapf(nil, "%s.id=%s duplicate on %s=%v",
-						s.Name(), id, n, v)
+						s.name, id, n, v)
 				}
 			}
 		} //for each item.key
@@ -611,7 +645,7 @@ func (s *store) AddToIndex(id string, i items.IItem) error {
 	return nil
 } //store.AddToIndex()
 
-func (s *store) DelFromIndex(id string, i items.IItem) {
+func (s *indexSet) DelFromIndex(id string, i items.IItem) {
 	if itemWithUniqueKeys, ok := i.(items.IItemWithUniqueKeys); ok {
 		keys := itemWithUniqueKeys.Keys()
 		for n, v := range keys {
@@ -624,6 +658,10 @@ func (s *store) DelFromIndex(id string, i items.IItem) {
 		}
 	}
 } //store.DelFromIndex()
+
+//index stores the id
+//use that to get the item in the store from itemByID[<id>]
+type itemIndex map[interface{}]string
 
 func newIndex() itemIndex {
 	return make(map[interface{}]string)
