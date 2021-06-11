@@ -12,9 +12,11 @@ import (
 
 	items "github.com/jansemmelink/items2"
 	"github.com/jansemmelink/items2/store/jsonfile"
-	"github.com/jansemmelink/log"
 	"github.com/satori/uuid"
+	"github.com/stewelarend/logger"
 )
+
+var log = logger.New()
 
 func Test1(t *testing.T) {
 	filename := "./share/users.json"
@@ -79,7 +81,7 @@ func checkIDs(store items.IStore, ids []string) error {
 	for _, id := range ids {
 		item, err := store.Get(id)
 		if err != nil || item == nil {
-			return log.Wrapf(err, "Get(id=%s)->(%p,%v)", id, item, err)
+			return logger.Wrapf(err, "Get(id=%s)->(%p,%v)", id, item, err)
 		}
 	}
 	log.Debugf("Found all %d ids=%v", len(ids), ids)
@@ -93,7 +95,7 @@ type user struct {
 
 func (u user) Validate() error {
 	if len(u.Name) == 0 {
-		return log.Wrapf(nil, "user.name not specified")
+		return logger.Wrapf(nil, "user.name not specified")
 	}
 	return nil
 }
@@ -215,7 +217,7 @@ func TestUniqueKeys(t *testing.T) {
 }
 
 func TestFileUpdate(t *testing.T) {
-	log.DebugOn()
+	log = log.WithLevel(logger.LevelDebug)
 	//delete the file to start with blank db
 	filename := "./share/users.json"
 	loadfilename := "./share/load/users.json"

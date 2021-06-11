@@ -15,15 +15,17 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 	items "github.com/jansemmelink/items2"
-	"github.com/jansemmelink/log"
+	"github.com/stewelarend/logger"
 )
+
+var log = logger.New()
 
 //MustNew calls New and panics on error
 //parentDir where items must be stored in <dir>/<name>/<filename>.json
 func MustNew(filename string, name string, tmpl items.IItem, idGen IIDGenerator) items.IStore {
 	s, err := New(filename, name, tmpl, idGen)
 	if err != nil {
-		panic(log.Wrapf(err, "Failed to create jsonfile store"))
+		panic(logger.Wrapf(err, "Failed to create jsonfile store"))
 	}
 	return s
 }
@@ -50,16 +52,16 @@ func New(filename string, name string, tmpl items.IItem, idGen IIDGenerator) (it
 func newStore(filename string, name string, tmpl items.IItem, idGen IIDGenerator) (*store, error) {
 	filename = path.Clean(filename)
 	if len(name) == 0 || !validName.MatchString(name) {
-		return nil, log.Wrapf(nil, "New(name==%s) invalid identifier", name)
+		return nil, logger.Wrapf(nil, "New(name==%s) invalid identifier", name)
 	}
 	if tmpl == nil {
-		return nil, log.Wrapf(nil, "New(tmpl==nil)")
+		return nil, logger.Wrapf(nil, "New(tmpl==nil)")
 	}
 	if idGen == nil {
-		return nil, log.Wrapf(nil, "New(idGen==nil)")
+		return nil, logger.Wrapf(nil, "New(idGen==nil)")
 	}
 	if _, ok := tmpl.(items.IItemWithID); ok {
-		return nil, log.Wrapf(nil, "%T may not have ID() method.", tmpl)
+		return nil, logger.Wrapf(nil, "%T may not have ID() method.", tmpl)
 	}
 	s := &store{
 		filename:      filename,
@@ -74,7 +76,7 @@ func newStore(filename string, name string, tmpl items.IItem, idGen IIDGenerator
 	}
 
 	if err := s.readFile(filename); err != nil {
-		return nil, log.Wrapf(err, "cannot access items in JSON file %s", filename)
+		return nil, logger.Wrapf(err, "cannot access items in JSON file %s", filename)
 	}
 
 	log.Debugf("Created JSON file store of %d %ss from file %s", len(s.itemByID), s.itemName, s.filename)
@@ -125,26 +127,26 @@ func (s *store) Add(item items.IItem) (string, error) {
 	defer s.mutex.Unlock()
 
 	if item == nil {
-		return "", log.Wrapf(nil, "cannot add nil item")
+		return "", logger.Wrapf(nil, "cannot add nil item")
 	}
 	if err := item.Validate(); err != nil {
-		return "", log.Wrapf(err, "cannot add invalid item")
+		return "", logger.Wrapf(err, "cannot add invalid item")
 	}
 
 	if err := s.indexSet.CheckUniqueness("", item); err != nil {
-		return "", log.Wrapf(err, "cannot add duplicate")
+		return "", logger.Wrapf(err, "cannot add duplicate")
 	}
 
 	//assign a new unique id
 	id := s.idGen.NewID()
 	if _, ok := s.itemByID[id]; ok {
-		return "", log.Wrapf(nil, "New %s.id=%s already exists", s.Name(), id)
+		return "", logger.Wrapf(nil, "New %s.id=%s already exists", s.Name(), id)
 	}
 
 	//append and update file
 	updatedItemsFromFile := append(s.itemsFromFile, fileItem{ID: id, Item: item})
 	if err := s.updateFile(updatedItemsFromFile); err != nil {
-		return "", log.Wrapf(err, "failed to update JSON file")
+		return "", logger.Wrapf(err, "failed to update JSON file")
 	}
 	s.itemByID[id] = item
 	s.indexSet.AddToIndex(id, item)
@@ -162,14 +164,14 @@ func (s *store) Upd(id string, item items.IItem) error {
 	defer s.mutex.Unlock()
 
 	if item == nil {
-		return log.Wrapf(nil, "cannot upd nil item")
+		return logger.Wrapf(nil, "cannot upd nil item")
 	}
 	if err := item.Validate(); err != nil {
-		return log.Wrapf(err, "cannot upd invalid item")
+		return logger.Wrapf(err, "cannot upd invalid item")
 	}
 
 	if err := s.indexSet.CheckUniqueness(id, item); err != nil {
-		return log.Wrapf(err, "upd will make a duplicate")
+		return logger.Wrapf(err, "upd will make a duplicate")
 	}
 
 	//replace and update file
@@ -185,11 +187,11 @@ func (s *store) Upd(id string, item items.IItem) error {
 		}
 	}
 	if updIndex < 0 {
-		return log.Wrapf(nil, "id=%s does not exist", id)
+		return logger.Wrapf(nil, "id=%s does not exist", id)
 	}
 
 	if err := s.updateFile(updatedItemsFromFile); err != nil {
-		return log.Wrapf(err, "failed to update JSON file")
+		return logger.Wrapf(err, "failed to update JSON file")
 	}
 	s.indexSet.DelFromIndex(id, oldItem)
 
@@ -224,7 +226,7 @@ func (s *store) Del(id string) error {
 	if deletedItem != nil {
 		//update the file contents
 		if err := s.updateFile(updatedItemsFromFile); err != nil {
-			return log.Wrapf(err, "failed to update JSON file")
+			return logger.Wrapf(err, "failed to update JSON file")
 		}
 		s.indexSet.DelFromIndex(id, deletedItem)
 		if deletedItemWithNotify, ok := deletedItem.(items.IItemWithNotifyDel); ok {
@@ -248,7 +250,7 @@ func (s *store) Get(id string) (items.IItem, error) {
 
 	existing, ok := s.itemByID[id]
 	if !ok {
-		return nil, log.Wrapf(nil, "%s.id=%s does not exist", s.Name(), id)
+		return nil, logger.Wrapf(nil, "%s.id=%s does not exist", s.Name(), id)
 	}
 	return existing, nil
 }
@@ -283,7 +285,7 @@ func (s *store) GetBy(key map[string]interface{}) (string, items.IItem, error) {
 		}
 	} //for each item from file
 
-	return "", nil, log.Wrapf(nil, "%s{%v} not found", s.itemName, key)
+	return "", nil, logger.Wrapf(nil, "%s{%v} not found", s.itemName, key)
 } //store.GetBy()
 
 func (s *store) newItem() items.IItem {
@@ -315,7 +317,7 @@ func (s *store) readFile(filename string) error {
 	if _, err := os.Stat(filename); err != nil {
 		f, err := os.Create(filename)
 		if err != nil {
-			return log.Wrapf(err, "cannot create file %s", filename)
+			return logger.Wrapf(err, "cannot create file %s", filename)
 		}
 
 		//created empty file
@@ -329,7 +331,7 @@ func (s *store) readFile(filename string) error {
 	//filename exists
 	f, err := os.Open(filename)
 	if err != nil {
-		return log.Wrapf(err, "cannot access file %s", filename)
+		return logger.Wrapf(err, "cannot access file %s", filename)
 	}
 	defer f.Close()
 
@@ -341,7 +343,7 @@ func (s *store) readFile(filename string) error {
 	//decode the file into the new slice:
 	if err := json.NewDecoder(f).Decode(itemSlicePtr); err != nil {
 		if err != io.EOF {
-			return log.Wrapf(err, "failed to read file %s into %T", filename, itemSlicePtr)
+			return logger.Wrapf(err, "failed to read file %s into %T", filename, itemSlicePtr)
 		}
 		//EOF: empty JSON file
 		//store now has empty list
@@ -361,24 +363,24 @@ func (s *store) readFile(filename string) error {
 		id := fileItemValue.Field(0).Interface().(string)
 		log.Debugf("add [%d] id=%s  (has %d)", i, id, len(itemByID))
 		if len(id) == 0 {
-			return log.Wrapf(nil, "Missing id in file %s %s[%d]", filename, s.Name(), i)
+			return logger.Wrapf(nil, "Missing id in file %s %s[%d]", filename, s.Name(), i)
 		}
 		if _, ok := itemByID[id]; ok {
-			return log.Wrapf(nil, "Duplicate id in file %s %s[%d].id=\"%s\"", filename, s.Name(), i, id)
+			return logger.Wrapf(nil, "Duplicate id in file %s %s[%d].id=\"%s\"", filename, s.Name(), i, id)
 		}
 
 		if fileItemValue.Field(1).IsNil() {
-			return log.Wrapf(nil, "item[%d].id=%s has no item data", i, id)
+			return logger.Wrapf(nil, "item[%d].id=%s has no item data", i, id)
 		}
 		itemData := fileItemValue.Field(1).Interface()
 		item := itemData.(items.IItem)
 		if err := item.Validate(); err != nil {
-			return log.Wrapf(err, "file %s %s[%d].id=%s is invalid", filename, s.Name(), i, id)
+			return logger.Wrapf(err, "file %s %s[%d].id=%s is invalid", filename, s.Name(), i, id)
 		}
 
 		//add to new index, list and map:
 		if err := indexSet.AddToIndex(id, item); err != nil {
-			return log.Wrapf(err, "file %s %s.id=%s has duplicate key", filename, s.Name(), id)
+			return logger.Wrapf(err, "file %s %s.id=%s has duplicate key", filename, s.Name(), id)
 		}
 		itemsFromFile = append(itemsFromFile, fileItem{ID: id, Item: item})
 		itemByID[id] = item
@@ -419,7 +421,7 @@ func (s *store) readFile(filename string) error {
 
 	if needUpdate {
 		if err := s.updateFile(itemsFromFile); err != nil {
-			return log.Wrapf(err, "Failed to update file %s with new ids", filename)
+			return logger.Wrapf(err, "Failed to update file %s with new ids", filename)
 		}
 	}
 
@@ -458,16 +460,16 @@ func (s *store) watchFile(filename string) error {
 			err := func(to, from string) error {
 				f1, err := os.Open(from)
 				if err != nil {
-					return log.Wrapf(err, "Failed to open %s", from)
+					return logger.Wrapf(err, "Failed to open %s", from)
 				}
 				defer f1.Close()
 				f2, err := os.Create(to)
 				if err != nil {
-					return log.Wrapf(err, "Failed to create %s", to)
+					return logger.Wrapf(err, "Failed to create %s", to)
 				}
 				defer f2.Close()
 				if _, err := io.Copy(f2, f1); err != nil {
-					return log.Wrapf(err, "Failed to copy %s to %s", from, to)
+					return logger.Wrapf(err, "Failed to copy %s to %s", from, to)
 				}
 				log.Debugf("Copied %s to %s", from, to)
 				return nil
@@ -497,9 +499,9 @@ func (s *store) watchFile(filename string) error {
 				changing = false
 			} else {
 				if changing {
-					log.Tracef("CHANGING  %s ...", filename)
+					log.Debugf("CHANGING  %s ...", filename)
 				} else {
-					log.Tracef("NO CHANGE %s ...", filename)
+					log.Debugf("NO CHANGE %s ...", filename)
 				}
 			}
 
@@ -515,14 +517,14 @@ func (s *store) watchFile(filename string) error {
 func (s *store) updateFile(updatedItems []fileItem) error {
 	f, err := os.Create(s.filename)
 	if err != nil {
-		return log.Wrapf(err, "Failed to create new file %s", s.filename)
+		return logger.Wrapf(err, "Failed to create new file %s", s.filename)
 	}
 	defer f.Close()
 
 	jsonFileData, _ := json.MarshalIndent(updatedItems, "", "  ")
 	_, err = f.Write(jsonFileData)
 	if err != nil {
-		return log.Wrapf(err, "Failed to write updated items to file %s", s.filename)
+		return logger.Wrapf(err, "Failed to write updated items to file %s", s.filename)
 	}
 
 	//written: update store now
@@ -531,7 +533,7 @@ func (s *store) updateFile(updatedItems []fileItem) error {
 } //store.updateFile()
 
 func (s *store) Uses(fieldName string, itemStore items.IStore) error {
-	return log.Wrapf(nil, "Not yet implemented")
+	return logger.Wrapf(nil, "Not yet implemented")
 }
 
 //mockItem implements IItem but is not used in this module
@@ -598,13 +600,13 @@ func (s *indexSet) CheckUniqueness(id string, i items.IItem) error {
 					//if this item has no id, this is a new item and it will
 					//be duplicate key
 					if len(id) == 0 {
-						return log.Wrapf(nil, "duplicate key: %s:{%s:%v}", s.name, n, v)
+						return logger.Wrapf(nil, "duplicate key: %s:{%s:%v}", s.name, n, v)
 					}
 
 					//item has an id, so we're busy updating an existing item:
 					//this is only duplicate if the indexed item is not this item
 					if otherItemID != id {
-						return log.Wrapf(nil, "duplicate key: %s:{%s:%v} same as %s:{id:%s}", s.name, n, v, s.name, otherItemID)
+						return logger.Wrapf(nil, "duplicate key: %s:{%s:%v} same as %s:{id:%s}", s.name, n, v, s.name, otherItemID)
 					}
 				}
 			}
@@ -629,7 +631,7 @@ func (s *indexSet) AddToIndex(id string, i items.IItem) error {
 			}
 			if existingID, ok := index[v]; ok {
 				if existingID != id {
-					return log.Wrapf(nil, "%s.id=%s duplicate on %s=%v",
+					return logger.Wrapf(nil, "%s.id=%s duplicate on %s=%v",
 						s.name, id, n, v)
 				}
 			}
